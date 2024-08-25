@@ -66,7 +66,7 @@
     nx = 100+ 2 * npml
     nz = 100+ npml
     !!
-    ngroup =6
+    ngroup =1
 
     dx=0.005d0
     dz=0.005d0
@@ -377,7 +377,7 @@
     nshot = 17
 
     allocate (Pext(nnode*2,nshot))
-    allocate( covUz(nobs*nfreq*nshot))
+    allocate( covUz(2*nobs*nfreq*nshot))
     Pext = 0.d0
 
 

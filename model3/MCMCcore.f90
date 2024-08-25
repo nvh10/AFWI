@@ -10,13 +10,13 @@
     double precision rhos, CS(nmatrl), CSest(nmatrl,2),  CS0(nmatrl),nuy,beta,dCs(nmatrl),CStemp(nmatrl)
 
     integer*8 pt(64)
-    double precision,allocatable:: hess(:,:),grad(:),cholhess(:,:),invHess(:,:),hess1(:,:),grad1(:),inv_sigma_M2(:,:)
+    double precision,allocatable:: cholhess(:,:),invHess(:,:),hess1(:,:),grad1(:),inv_sigma_M2(:,:)
     integer INFO
-    double precision sigma_M2(nmatrl,nmatrl),covUz(nobs*nfreq*nshot), invcovUz(nobs*nfreq*nshot)
+    double precision sigma_M2(nmatrl,nmatrl),covUz(2*nobs*nfreq*nshot), invcovUz(2*nobs*nfreq*nshot)
     double precision prop01,prop10,post0,post1,gama
     double precision Uz_measuredt(2*nobs*nfreq_total*nshot),  derr(nobs*nfreq*nshot), randCs(nmatrl),derr_CS(nmatrl)
-    double complex Uz_measured(nobs*nfreq_total*nshot),a1,a2,a4,CS_equi(nelmt),CP_equi(nelmt),dStiffness_all(8,8,nmatrl)
-    double complex,allocatable ::Hmat(:,:),dprd(:),dobs(:)
+    double complex Uz_measured(nobs*nfreq_total*nshot),a1,a2,a4,CS_equi(nelmt),CP_equi(nelmt),dStiffness_all(8,8,nmatrl),dCs_c(nmatrl)
+    double complex,allocatable ::hess(:,:),grad(:),Hmat(:,:),dprd(:),dobs(:)
 
 
     ! node data
@@ -35,7 +35,7 @@
     integer outsgb, outrhb, outest, inexa, inpar, inrfa, outerr, inobs, outrsp, outrsl,outcovM,nnz_P2
     double precision pi, ww    !
     double complex,allocatable :: MSN22(:), DPN22(:), STN22(:), RRN22(:),DSN22(:)
-    double complex,allocatable :: eK(:,:),v_P2(:,:)
+    double complex,allocatable :: eK(:,:),v_P2(:,:),C_md(:,:),Ldd(:,:)
     integer,allocatable :: ia_P2(:),ja_p2(:),pB_P2(:),pE_P2(:)
     double complex,allocatable :: Uz_estimated(:,:), dUz_estimated(:,:,:)
     integer nn, n1, n2, nfix, ne, nm, ifreq, itmp, jtmp, inode, jnode, idof, jdof, ielmt, iSample, imatrl, ktmp
@@ -55,7 +55,7 @@
     allocate(Uz_estimated(nfreq*nobs*nshot,2),dUz_estimated (nfreq*nobs*nshot,nmatrl,1))
     allocate(hess(nmatrl,nmatrl),grad(nmatrl),inv_sigma_M2(nmatrl,nmatrl))
     allocate (GA(2*nfreq*nobs*nshot,nmatrl),CA_Uz_cal(2*nfreq*nobs*nshot),CA_Uz_obs(2*nfreq*nobs*nshot),inv_Ca_D(nfreq*nobs*nshot*2),Ca_D(nfreq*nobs*nshot*2))
-
+    allocate(C_md(nmatrl,2*nfreq*nobs*nshot),Ldd(nfreq*nobs*nshot*2,nfreq*nobs*nshot*2))
 
     !allocate(cholhess(nmatrl,nmatrl),hess_ap(nmatrl,nmatrl))
     !allocate(hess1(nmatrl,nmatrl),grad1(nmatrl))
@@ -64,13 +64,14 @@
 
     !call InverseMatrixD(nmatrl, covM, invcovM)
     inv_sigma_M2=0d0
-    call InverseMatrixD(nmatrl, sigma_M2, inv_sigma_M2)
-    !do imatrl=1,nmatrl
-    !    inv_sigma_M2(imatrl,imatrl)=1d0/sigma_M2(imatrl)
-    !enddo
+    !call InverseMatrixD(nmatrl, sigma_M2, inv_sigma_M2)
+    do imatrl=1,nmatrl
+        inv_sigma_M2(imatrl,imatrl)=1d0/sigma_M2(imatrl,imatrl)
+    enddo
+
     !call InverseMatrixD(nfreq*nobs*nshot, covUz, invcovUz)
     invcovUz=0d0
-    do itmp=1, nfreq*nobs*nshot
+    do itmp=1, 2*nfreq*nobs*nshot
         invcovUz(itmp)=1d0/covUz(itmp)
     enddo
     CS0=CSest(:,1)
@@ -255,9 +256,11 @@
     CA_Uz_obs(1:nfreq*nobs*nshot)=dobs
     CA_Uz_obs(nfreq*nobs*nshot+1:nfreq*nobs*nshot*2)=dconjg(dobs)
 
-    !call hessgrad(dUz_estimated(:,:,1),Uz_estimated(:,1),dobs,invcovUz,inv_sigma_M2,CSest(:,1),CS0,nfreq*nobs*nshot,nmatrl,hess,grad)
 
     call hessgrad(GA,CA_Uz_cal,CA_Uz_obs,inv_Ca_D,inv_sigma_M2,CSest(:,1),CS0,2*nfreq*nobs*nshot,nmatrl,hess,grad)
+
+    !call Cmd_Cdd_ensemble(GA,CS0,nmatrl,2*nfreq*nobs*nshot,C_md,Ldd,invcovUz,sigma_M2,CA_Uz_cal,CA_Uz_obs,Csest(:,1))
+    !call solution_ensemble(GA,C_md,Ldd,CA_Uz_cal,CA_Uz_obs,CSest(:,1),CS0,nmatrl,2*nfreq*nobs*nshot,dCS)
 
 
 
@@ -274,7 +277,8 @@
         !call random_stdnormal(randCs,nmatrl)
 
         !call system_clock(tclock2)
-        call solveAxB(nmatrl,1, hess, grad,dCs)
+        call solveAxB_Z(nmatrl,1, hess, grad,dCs_c)
+        dCs=dreal(dCs_c)
         !call system_clock(tclock22, clock_rate2)
         !elapsed_time2 = float(tclock22 - tclock2) / float(clock_rate2)
         !write(*,*) "dCs", elapsed_time2
@@ -285,8 +289,8 @@
         randCs=0d0
         !call system_clock(tclock2)
         !call DTRTRS('L','T','N',nmatrl,1,cholhess,nmatrl,CStemp,nmatrl,INFO)
-
-        CSest(:,2) = Csest(:,1)-alpha_coef*dCs+beta_coef*CStemp
+        CSest(:,2) =CSest(:,1) -alpha_coef*dCs+beta_coef*CStemp
+        !CSest(:,2) = CS0-alpha_coef*dCs+beta_coef*CStemp
         !call system_clock(tclock22, clock_rate2)
         !elapsed_time2 = float(tclock22 - tclock2) / float(clock_rate2)
         !write(*,*) "DTRTRS", elapsed_time2
@@ -353,53 +357,13 @@
         GA(1+nfreq*nobs*nshot:2*nfreq*nobs*nshot,:)=dconjg(dUz_estimated(:,:,1))
         CA_Uz_cal(1:nfreq*nobs*nshot)=Uz_estimated(:,2)
         CA_Uz_cal(nfreq*nobs*nshot+1:nfreq*nobs*nshot*2)=dconjg(Uz_estimated(:,2))
-        !call system_clock(tclock2)
-        !call hessgrad(dUz_estimated(:,:,1),Uz_estimated(:,2),dobs,invcovUz,inv_sigma_M2,CSest(:,2),CS0,nfreq*nobs*nshot,nmatrl,hess,grad)
         call hessgrad(GA,CA_Uz_cal,CA_Uz_obs,inv_Ca_D,inv_sigma_M2,CSest(:,2),CS0,2*nfreq*nobs*nshot,nmatrl,hess,grad)
-
-        !call system_clock(tclock22, clock_rate2)
-        !elapsed_time2 = float(tclock22 - tclock2) / float(clock_rate2)
-        !write(*,*) "hessgrad", elapsed_time2
-        !
-        !call system_clock(tclock2)
-        !call DetterminantD(nmatrl, 0.0004d0*cholhess,detHa)
-        !call DetterminantD(nmatrl, 0.0004d0*hess,detHb)
-        !detH=detHb/detHa
-
-        !call system_clock(tclock22, clock_rate2)
-        !elapsed_time2 = float(tclock22 - tclock2) / float(clock_rate2)
-        !write(*,*) "detH", elapsed_time2, detH, detHb, detHa
-
-
-        !call system_clock(tclock2)
-        !call solveAxB(nmatrl,1, hess, grad,dCs)
-        !CStemp = CSest(:,1) - (CSest(:,2)-alpha_coef*dCs)
-        !call system_clock(tclock22, clock_rate2)
-        !elapsed_time2 = float(tclock22 - tclock2) / float(clock_rate2)
-        !write(*,*) "dCs", elapsed_time2
-        !
-        !call postprop(hess,CStemp,1d0/beta_coef**2d0,nmatrl,prop10)
-        !gama=min(1d0,detH**0.5*dexp(post1-post0+prop10-prop01))
-        !gama=1d0
-        !call random_number(u_rand)
-        !if (u_rand>gama) then
-        !    CSest(:,2) = CSest(:,1)
-        !else
-        !    Uz_estimated(:,1) = Uz_estimated(:,2)
-        !    dUz_estimated(:,:,1) = dUz_estimated(:,:,2)
-        !    CSest(:,1) = CSest(:,2)
-        !    hess1=hess
-        !    grad1=grad
-        !
-        !endif
-
+        !call Cmd_Cdd_ensemble(GA,CS0,nmatrl,2*nfreq*nobs*nshot,C_md,Ldd,invcovUz,sigma_M2,CA_Uz_cal,CA_Uz_obs,Csest(:,2))
+        !call solution_ensemble(GA,C_md,Ldd,CA_Uz_cal,CA_Uz_obs,CSest(:,2),CS0,nmatrl,2*nfreq*nobs*nshot,dCS)
 
         derr_CS = dabs( CSest(:,2)- CSest(:,1))
         Uz_estimated(:,1) = Uz_estimated(:,2)
-        !dUz_estimated(:,:,1) = dUz_estimated(:,:,1)
         CSest(:,1) = CSest(:,2)
-        !hess1=hess
-        !grad1=grad
 
 
         write (outest,'(i10,i10,<nmatrl>f15.5)') igroup,iSample, (CSest(1:nmatrl,1))
@@ -525,13 +489,15 @@
         deallocate (invDSN22T)
 
     enddo
-   
+
     GA(1:nfreq_total*nobs*nshot,:)=dUz_estimated(:,:,1)
-    GA(1+nfreq_total*nobs*nshot:2*nfreq_total*nobs*nshot,:)=dconjg(dUz_estimated(:,:,1))
-    
+    deallocate(dUz_estimated)
+    do imatrl=1,nmatrl
+        GA(1+nfreq_total*nobs*nshot:2*nfreq_total*nobs*nshot,imatrl)=dconjg(GA(1:nfreq_total*nobs*nshot,imatrl))
+    enddo
 
     !call update_inv_sigma_M2(GA,CA_Uz_cal,CA_Uz_obs,inv_Ca_D, inv_sigma_M2,CSest,2*nfreq*nobs*nshot,nmatrl)
-    deallocate(dUz_estimated)
+
     call update_inv_sigma_M2(GA,inv_Ca_D, inv_sigma_M2,2*nfreq_total*nobs*nshot,nmatrl)
     !write (outcovM,'(<nmatrl>f15.5)')  1d0/dsqrt(inv_sigma_M2(1:nmatrl))
     !call update_inv_sigma_M2(GA,CA_Uz_cal,CA_Uz_obs,inv_Ca_D, inv_sigma_M2,CSest(:,1),2*nfreq*nobs*nshot,nmatrl)
