@@ -66,15 +66,15 @@
     !nx = 100+ 2 * npml
     !nz = 100+ npml
     !!
-    ngroup =11
+    ngroup =10
 
     !dx=0.005d0
     !dz=0.005d0
-    dx = 9.2d0 / (nx - 2 * npml)
-    dz = 3.0d0 / (nz - npml)
+    dx = 0.0375!9.2d0 / (nx - 2 * npml)
+    dz = 0.0375!3.0d0 / (nz - npml)
     nfreq = 6
-    nfreq_total = 56
-    dfreq = (6.5d0-1d0)/(nfreq_total-1)
+    nfreq_total = 60
+    dfreq = (6d0-0.1d0)/(nfreq_total-1)
     dof=2
     nSample = 50
 
@@ -88,7 +88,7 @@
 
         !freq_total(itmp) = 33d0-(itmp-1)*dfreq
         !freq(itmp) = 1d0*dfreq
-        freq_total(itmp) = 1d0+(itmp-1)*dfreq
+        freq_total(itmp) = 0.1d0+(itmp-1)*dfreq
     enddo
     !dd=6d0!(nfreq_total-nfreq)/(ngroup-2)
     dd=(nfreq_total-nfreq)/(ngroup-2)
@@ -281,7 +281,7 @@
     enddo
 
     !nobs = 33!nx - 2*npml + 1-2
-    nobs = 246!marmousi
+    nobs = 36!246!marmousi
 
     allocate ( onode(nobs))
     allocate (lb(nmatrl),ub(nmatrl))
@@ -289,24 +289,24 @@
     do inode = 1 , nobs
 
         itmp = inode
-        onode(itmp) =  (nx + 1) * nz +npml+1+ 1*(itmp-1)
+        onode(itmp) = (nx + 1) * nz +npml+1+ 7*(itmp-1) !marmousi
         !onode(itmp) =  (nx + 1) * nz +npml+1+ 3*(itmp-1)+2
 
 
     enddo
     !nshot=1
-    nshot=50!marmousi
+    nshot=36!50!marmousi
     !nshot = 17
 
     allocate (Pext(nnode*2,nshot))
-    allocate( covUz(nobs*nfreq*nshot))
+    allocate( covUz(2*nobs*nfreq*nshot))
     Pext = 0.d0
 
 
     do itmp = 1 ,nshot
         !inode=12363
         !inode =  (nx + 1) * nz +npml+1+ 6*(itmp-1)+2
-        inode = (nx + 1) * nz +npml+1+ 5*(itmp-1) !marmousi
+        inode = (nx + 1) * nz +npml+1+ 7*(itmp-1) !marmousi
 
         write(*,*)  inode
 
@@ -424,16 +424,16 @@
 
 
         allocate( sigma_M2(nmatrl,nmatrl))
-        d_sigma = (0.15d0-0.05d0)/(nz-npml-1)
+        d_sigma = (0.2d0-0.01d0)/(nz-npml-1)
 
 
-        do itmp = 1, nz-npml
-            do jtmp=(itmp-1)*(nx-2*npml)+1,itmp*(nx-2*npml)
-                sigma_M2( jtmp,jtmp) = ((0.15d0-(itmp-1)*d_sigma))
-            enddo
-        enddo
+        !do itmp = 1, nz-npml
+        !    do jtmp=(itmp-1)*(nx-2*npml)+1,itmp*(nx-2*npml)
+        !        sigma_M2( jtmp,jtmp) = ((0.2d0-(itmp-1)*d_sigma))
+        !    enddo
+        !enddo
         do imatrl=1,nmatrl
-            sigma_M2(imatrl,imatrl)=(sigma_M2(imatrl,imatrl)*CSest(imatrl,1))**2d0
+            sigma_M2(imatrl,imatrl)=0.2d0**2d0
         enddo
 open (1001 , file='marmousi.priC')
         do imatrl =1,nmatrl
@@ -457,9 +457,9 @@ open (1001 , file='marmousi.priC')
         covUz = 0.d0
 
 
-        do itmp = 1 , nobs*nfreq*nshot
+        do itmp = 1 , 2*nobs*nfreq*nshot
 
-            covUz(itmp) = (0.002d0*1.d0)**2
+            covUz(itmp) = (0.001d0*1.d0)**2
             !covUz(itmp) = 0.06
 
         enddo

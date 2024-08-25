@@ -36,17 +36,70 @@
 
     end subroutine solveAxB
 
+    subroutine solveAxB_Z(N,M, A, B,X)
+    implicit none
+    integer N, IPIV(N), INFO,ix,iz,LWORK,M
+    double complex A(N,N), invA(N,N),B(N,M),X(N,M)
+
+    double complex,allocatable ::WORK(:)
+
+    LWORK=128*N
+    allocate(WORK(LWORK))
+    invA = A
+    X=B
+    
+    call ZPOTRF('U',N,invA,N,info)
+    call ZPOTRS('U', N, 1, invA, N, X, N, info )
+
+    
+    !call ZSYTRF('U',N,invA(:,:),N,IPIV,WORK,LWORK,INFO)
+    !
+    !Call ZSYTRS('U', N, M, invA, N, IPIV, X, N,INFO)
+    !
+
+
+    end subroutine solveAxB_Z
+
 
 
 
     subroutine InverseMatrixZ(N, A, invA)
     implicit none
-    integer N, IPIV(N), INFO
-    double complex A(N,N), invA(N,N), WORK(N)
+    integer N, IPIV(N), INFO,LWORK,ix,iz
+    double complex A(N,N), invA(N,N),cholA(N,N)
+    double complex,allocatable ::WORK(:)
 
+    allocate(WORK(N))
     invA(:,:) = A(:,:)
     call ZGETRF (N, N, invA(:,:), N, IPIV(:), INFO)
     call ZGETRI (N, invA(:,:), N, IPIV(:), WORK(:), N, INFO)
+
+
+    !LWORK=128*N
+    !allocate(WORK(LWORK))
+    !invA = A
+    !call ZSYTRF('U',N,invA(:,:),N,IPIV,WORK,LWORK,INFO)
+    !call ZSYTRI('U',N,INVA(:,:),N,IPIV,WORK,INFO)
+    !do ix=1,N-1
+    !    INVA(ix+1:N,ix)=INVA(ix,ix+1:N)
+    !enddo
+    !invA=A
+    !
+    !!$omp parallel do
+    !do iz=1,N
+    !    do ix=iz+1,N
+    !        INVA(ix,iz)=dcmplx(1d0,0d0)
+    !    enddo
+    !enddo
+    !!$omp end parallel do
+    !call ZPOTRF('U',N,INVA,N,info)
+    !call ZPOTRI( 'U', N, INVA, N, info )
+    !!$omp parallel do
+    !do ix=1,N-1
+    !    INVA(ix+1:N,ix)=INVA(ix,ix+1:N)
+    !enddo
+    !!$omp end parallel do
+
 
     end subroutine InverseMatrixZ
 
@@ -226,3 +279,19 @@
     enddo
     !$omp end parallel do
     end subroutine cholesky_lower
+
+    subroutine cholesky_lower_Z(N, A,cholA)
+    implicit none
+    integer N, INFO, ix,iz
+    double complex A(N,N),  cholA(N,N)
+    cholA=A
+    !$omp parallel do
+    do iz=1,N
+        do ix=iz+1,N
+            cholA(ix,iz)=0d0
+        enddo
+    enddo
+    !$omp end parallel do
+    call ZPOTRF('U',N,cholA,N,info)
+
+    end subroutine cholesky_lower_Z
