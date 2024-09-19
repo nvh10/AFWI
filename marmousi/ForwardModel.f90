@@ -1,4 +1,4 @@
-    subroutine Cmd_Cdd_ensemble(GA,CS0,nmatrl,nobs,Cmd,K,invcovUz,sigma_M2,da_cal,da_obs,CS)
+    subroutine Cmd_Cdd_ensemble(GA,CS0,nmatrl,nobs,Cmd,Ldd,invcovUz,sigma_M2,da_cal,da_obs,CS)
     implicit none
     integer nobs,nmatrl,iz,ix,itmp,INFO,LWORK
 
@@ -9,6 +9,7 @@
     double precision CS(nmatrl),dtheta(nmatrl),CStemp(nmatrl)
 
 
+    !call ZGEMM('N','C',nmatrl,nobs,nmatrl,dcmplx(1d0,0d0),dcmplx(sigma_M2,0d0),nmatrl,GA,nobs,dcmplx(0d0,0d0),Cmd,nmatrl)
     !$omp parallel do
     do itmp=1, nmatrl
         Cmd(itmp,:)=sigma_M2(itmp,itmp)*dconjg(Ga(:,itmp))
@@ -16,12 +17,18 @@
     !$omp end parallel do
     call ZGEMM('N','N',nobs,nobs,nmatrl,dcmplx(1d0,0d0),GA,nobs,Cmd,nmatrl,dcmplx(0d0,0d0),K,nobs)
 
+
+    !call ZGEMM('N','N',nobs,nmatrl,nmatrl,dcmplx(1d0,0d0),GA,nobs,dcmplx(sigma_M2,0d0),nmatrl,dcmplx(0d0,0d0),GaCOV,nobs)
+    !call ZGEMM('N','C',nobs,nobs,nmatrl,dcmplx(1d0,0d0),GaCOV,nobs,GA,nobs,dcmplx(0d0,0d0),K,nobs)
     !$omp parallel do
     do itmp=1,nobs
         K(itmp,itmp)=K(itmp,itmp)+1/dcmplx(invcovUz(1),0d0)
     enddo
     !$omp end parallel do
-    !Ldd=K
+    Ldd=K
+    !call cholesky_lower_Z(nobs, K,Ldd)
+
+    !call solution_ensemble(GA,Cmd,Lk,da_cal,da_obs,CS,CS0,nmatrl,nobs,dtheta)
 
     endsubroutine Cmd_Cdd_ensemble
 
@@ -33,12 +40,30 @@
     integer nmatrl,nmeas,itmp
     double complex GA(nmeas,nmatrl),Cmd(nmatrl,nmeas),Ldd_1(nmeas,nmeas),CA_Uz_cal(nmeas),CA_Uz_obs(nmeas),D(nmatrl,nmeas),b(nmeas),gg(nmeas),dCSc(nmatrl),b1(nmeas),b2(nmeas),inv_Ldd_1(nmeas,nmeas)
     double precision CS(nmatrl),CS0(nmatrl),dCS(nmatrl)
-
+    integer(kind=8) :: tclock1, tclock2, clock_rate
+    real(kind=8) :: elapsed_time
+    integer(kind=8) :: tclock11, tclock22, clock_rate2
+    real(kind=8) :: elapsed_time2
+    
+    
     call ZGEMM('N','N',nmeas,1,nmatrl,dcmplx(1d0,0d0),GA,nmeas,dcmplx(CS-CS0,0d0),nmatrl,dcmplx(0d0,0d0),b,nmeas)
     b=CA_Uz_cal-CA_Uz_obs-b
+    call system_clock(tclock1)
     call solveAxB_Z(nmeas,1, Ldd_1, b,b1)
+     call system_clock(tclock2, clock_rate)
+        elapsed_time = float(tclock2 - tclock1) / float(clock_rate)
+        write(*,*) "       + time for inversion : ", elapsed_time
+
     call ZGEMM('N','N',nmatrl,1,nmeas,dcmplx(1d0,0d0),Cmd,nmatrl,b1,nmeas,dcmplx(0d0,0d0),dCsc,nmatrl)
     dCs=dreal(dCsc)
+
+    !D=Cmd
+    !call ZTRSM('R','U','N','N',nmatrl,nmeas,dcmplx(1d0,0d0),Ldd_1,nmeas,D,nmatrl)
+    !call ZGEMM('N','N',nmeas,1,nmatrl,dcmplx(1d0,0d0),GA,nmeas,dcmplx(CS-CS0,0d0),nmatrl,dcmplx(0d0,0d0),b,nmeas)
+    !b=CA_Uz_cal-CA_Uz_obs-b
+    !call ZTRSM('L','U','C','N',nmeas,1,dcmplx(1d0,0d0),Ldd_1,nmeas,b,nmeas)
+    !call ZGEMM('N','N',nmatrl,1,nmeas,dcmplx(1d0,0d0),D,nmatrl,b,nmeas,dcmplx(0d0,0d0),dCsc,nmatrl)
+    !dCs=dreal(dCsc)
     endsubroutine solution_ensemble
 
     subroutine hessgrad(dUz_estimated,Uz_estimated,Uz_measured,invcovUz, inv_sigma_M2,CSest,CS0,nobs,nmatrl,hess,grad)
@@ -49,20 +74,81 @@
     double precision inv_sigma_M2(nmatrl,nmatrl),invcovUz(nobs),CS0(nmatrl),CSest(nmatrl)
     double complex,allocatable ::dUzTinvCovUz(:,:),dUzconj(:,:),hess1(:,:),Uz_temp(:),dUzconjT(:,:)
     double precision,allocatable ::CStemp(:),grad2(:)
+    integer(kind=8) :: tclock11, tclock22, clock_rate2
+    real(kind=8) :: elapsed_time2
+    integer(kind=8) :: tclock1, tclock2
+    !allocate(dUzconj(nobs,nmatrl))
+    !write (*,*) '2'
+    !dUzconj=dconjg(dUz_estimated)
+    !write (*,*) '2.1'
+    !allocate(dUzconjT(nmatrl,nobs))
+    !dUzconjT=transpose(dUzconj)
+    !deallocate(dUzconj)
     allocate(dUzTinvCovUz(nmatrl,nobs))
+
+    !dUzTinvCovUz=dUzconjT*dcmplx(invcovUz(1),0d0)
+    !call system_clock(tclock2)
+    !dUzTinvCovUz=transpose(dconjg(dUz_estimated))*dcmplx(invcovUz(1),0d0)
     dUzTinvCovUz=(dconjg(dUz_estimated))
+    !call system_clock(tclock22, clock_rate2)
+    !elapsed_time2 = float(tclock22 - tclock2) / float(clock_rate2)
+    !write(*,*) "---transpose conjugate", elapsed_time2
+    !deallocate(dUzconjT)
 
     allocate(hess1(nmatrl,nmatrl),Uz_temp(nobs),grad1(nmatrl))
+    !call zsymm('R', 'U', nmatrl, nobs, dcmplx(1d0,0d0),dcmplx(invcovUz,0d0),nobs, dUzconjT, nmatrl, dcmplx(0d0,0d0), dUzTinvCovUz, nmatrl)
+    !!call zgemm('T', 'N', nmatrl, nobs, nobs, dcmplx(1d0,0d0), dUzconj, nobs, dcmplx(invcovUz,0d0),nobs, dcmplx(0d0,0d0), dUzTinvCovUz, nmatrl)
+    !call system_clock(tclock2)
     call zgemm('T', 'N', nmatrl, nmatrl, nobs, dcmplx(invcovUz(1),0d0), dUzTinvCovUz, nobs, dUz_estimated,nobs, dcmplx(0d0,0d0), hess1, nmatrl)
+    !
+    !call zgemm('N', 'N', nmatrl, nmatrl, nobs, dcmplx(1d0,0d0), dUzTinvCovUz, nmatrl, dUz_estimated,nobs, dcmplx(0d0,0d0), hess1, nmatrl)
     hess=hess1
 
     hess=hess+inv_sigma_M2
+
+    !call system_clock(tclock22, clock_rate2)
+    !    elapsed_time2 = float(tclock22 - tclock2) / float(clock_rate2)
+    !    write(*,*) "---hess", elapsed_time2
+    !hess=hess+inv_sigma_M2
+    !call zsyrk('L','T',nmatrl,nobs,dcmplx(1d0,0d0),dUzconj,nobs,dcmplx(0d0,0d0),hess1, nmatrl)
+    !hess=0d0
+    !!$omp parallel do
+    !    do iz=1,nmatrl
+    !
+    !        hess(iz,iz)=dreal(hess1(iz,iz))
+    !
+    !    enddo
+    !    !$omp end parallel do
+    !    hess=hess+invcovM
+    !hess=dreal(hess1)*invcovUz(1,1)+invcovM
+
+    !call system_clock(tclock2)
     Uz_temp=Uz_estimated- Uz_measured
     call zgemm('T', 'N', nmatrl, 1,nobs,  dcmplx(invcovUz(1),0d0), dUzTinvCovUz, nobs, Uz_temp,nobs, dcmplx(0d0,0d0), grad1, nmatrl)
+    !call zgemm('N', 'N', nmatrl, 1,nobs,  dcmplx(1d0,0d0), dUzTinvCovUz, nmatrl, Uz_temp,nobs, dcmplx(0d0,0d0), grad1, nmatrl)
+    !call system_clock(tclock22, clock_rate2)
+    !    elapsed_time2 = float(tclock22 - tclock2) / float(clock_rate2)
+    !    write(*,*) "---grad1", elapsed_time2
+
+    !call system_clock(tclock2)
     allocate(CStemp(nmatrl),grad2(nmatrl))
     CStemp=CSest - CS0
     call dsymm('L', 'U', nmatrl, 1, 1d0,inv_sigma_M2,nmatrl, CStemp, nmatrl, 0d0, grad2, nmatrl)
+    !do itmp=1,nmatrl
+    !    grad2( itmp)=inv_sigma_M2( itmp)*CStemp(itmp)
+    !enddo
+
+    !call system_clock(tclock22, clock_rate2)
+    !elapsed_time2 = float(tclock22 - tclock2) / float(clock_rate2)
+    !write(*,*) "---grad2", elapsed_time2
+    !grad2=matmul(inv_sigma_M2,CStemp)
+
+    !call system_clock(tclock2)
+    !call dgemm('N', 'N', nmatrl,1, nmatrl, 1d0, invcovM, nmatrl, CStemp,nmatrl, 0d0, grad2, nmatrl)
     grad=grad1+grad2
+    !call system_clock(tclock22, clock_rate2)
+    !   elapsed_time2 = float(tclock22 - tclock2) / float(clock_rate2)
+    !   write(*,*) "---grad", elapsed_time2
 
     deallocate(dUzTinvCovUz,hess1,Uz_temp)
     deallocate(CStemp,grad2)

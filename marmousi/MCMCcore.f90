@@ -5,17 +5,18 @@
 
     integer  nfreq_total,itype,ishot,nfreq,ngroup,dd
     integer nnode, nelmt, nmatrl, nSample, norder, nobs, onode(nobs), npml
-    double precision alpha_coef, beta_coef,u_rand,dtmp2,dtmp1,width,depth
+    double precision alpha_coef, beta_coef, lb(nmatrl),ub(nmatrl),u_rand,dtmp2,dtmp1,width,depth
+    real(kind=16)::detHa,detH,detHb
     double precision rhos, CS(nmatrl), CSest(nmatrl,2),  CS0(nmatrl),nuy,beta,dCs(nmatrl),CStemp(nmatrl)
 
     integer*8 pt(64)
-    double precision,allocatable:: inv_sigma_M2(:,:)
+    double precision,allocatable:: cholhess(:,:),invHess(:,:),hess1(:,:),grad1(:),inv_sigma_M2(:,:)
     integer INFO
     double precision sigma_M2(nmatrl,nmatrl),covUz(2*nobs*nfreq*nshot), invcovUz(2*nobs*nfreq*nshot)
- 
-    double precision derr(nobs*nfreq*nshot),derr_CS(nmatrl)
-    double complex Uz_measured(nobs*nfreq_total*nshot),CS_equi(nelmt),CP_equi(nelmt),dStiffness_all(8,8,nmatrl),dCs_c(nmatrl)
-    double complex,allocatable ::hess(:,:),grad(:),dprd(:),dobs(:)
+    double precision prop01,prop10,post0,post1,gama
+    double precision Uz_measuredt(2*nobs*nfreq_total*nshot),  derr(nobs*nfreq*nshot), randCs(nmatrl),derr_CS(nmatrl)
+    double complex Uz_measured(nobs*nfreq_total*nshot),a1,a2,a4,CS_equi(nelmt),CP_equi(nelmt),dStiffness_all(8,8,nmatrl),dCs_c(nmatrl)
+    double complex,allocatable ::hess(:,:),grad(:),Hmat(:,:),dprd(:),dobs(:)
 
 
     ! node data
@@ -56,10 +57,19 @@
     allocate (GA(2*nfreq*nobs*nshot,nmatrl),CA_Uz_cal(2*nfreq*nobs*nshot),CA_Uz_obs(2*nfreq*nobs*nshot),inv_Ca_D(nfreq*nobs*nshot*2),Ca_D(nfreq*nobs*nshot*2))
     allocate(C_md(nmatrl,2*nfreq*nobs*nshot),Ldd(nfreq*nobs*nshot*2,nfreq*nobs*nshot*2))
 
+    !allocate(cholhess(nmatrl,nmatrl),hess_ap(nmatrl,nmatrl))
+    !allocate(hess1(nmatrl,nmatrl),grad1(nmatrl))
+
+
+
+    !call InverseMatrixD(nmatrl, covM, invcovM)
     inv_sigma_M2=0d0
+    !call InverseMatrixD(nmatrl, sigma_M2, inv_sigma_M2)
     do imatrl=1,nmatrl
         inv_sigma_M2(imatrl,imatrl)=1d0/sigma_M2(imatrl,imatrl)
     enddo
+
+    !call InverseMatrixD(nfreq*nobs*nshot, covUz, invcovUz)
     invcovUz=0d0
     do itmp=1, 2*nfreq*nobs*nshot
         invcovUz(itmp)=1d0/covUz(itmp)
@@ -89,6 +99,21 @@
     write (outest,'(i10,i10,<nmatrl>f15.5)') 0,0, (CSest(1:nmatrl,1))
     write (outrsp,'(10x,<2*nobs>i16)') (onode(inode), onode(inode), inode = 1 , nobs)
 
+    Uz_measuredt = 0.d0
+    Uz_measured = 0.d0
+    read (inobs,*)
+
+    do ifreq = 1 , nfreq_total*nshot
+
+        read (inobs,*) dtmp1, (Uz_measuredt(2*nobs*(ifreq-1)+2*itmp-1), Uz_measuredt(2*nobs*(ifreq-1)+2*itmp), itmp = 1 , nobs)
+
+    enddo
+    do ifreq = 1 , nfreq_total*nshot
+        do itmp = 1 , nobs
+            Uz_measured(nobs*(ifreq-1)+itmp)=dcmplx(Uz_measuredt(2*nobs*(ifreq-1)+2*itmp-1),Uz_measuredt(2*nobs*(ifreq-1)+2*itmp))
+        enddo
+    enddo
+
     iSample = 0
     iflag = 1
 
@@ -109,12 +134,15 @@
 
 
     nnz_P2=count(P2(:,1,:)/=dcmplx(0d0,0d0))
+    !allocate(v_P2(nnz_P2),ja_P2(nnz_P2),ia_P2(nbc(2)+1),pB_P2(nbc(2)),pE_P2(nbc(2)))
     allocate(v_P2(nnz_P2,nshot),ja_P2(nnz_P2),ia_P2(nmatrl+1),pB_P2(nmatrl),pE_P2(nmatrl))
     allocate(P2T(nmatrl,nbc(2)))
     P2T=transpose(P2(:,1,:))
     call create_CSR_formartZ(P2T,nmatrl,nbc(2),ia_P2,ja_P2,v_P2(:,1),nnz_P2)
     pB_P2=ia_P2(1:nmatrl)
     pE_P2=ia_P2(2:nmatrl+1)
+    ! pB_P2=ia_P2(1:nbc(2))
+    !pE_P2=ia_P2(2:nbc(2)+1)
     deallocate(P2T)
     deallocate( Dis2,P2)
 
@@ -124,6 +152,7 @@
     dd=(nfreq_total-nfreq)/(ngroup-2)
     igroup=1
     freq=group_frequency(:,igroup)
+    !dobs=Uz_measured(1:nfreq*nshot*nobs)
 
 
     call FiniteElement_PlaneStrain(CS_equi,nnode, nelmt, nmatrl, CS, rhos,nuy,beta, MSN22, DPN22,  STN22, RRN22,x, z, enode, matrl, etype, epara, nbc, id, ia, ja)
@@ -133,8 +162,12 @@
         allocate(P2(nbc(2),nshot,1))
         ww = 2.d0*pi * freq(ifreq)
         DSN22 = -ww**2.d0 * MSN22 + dcmplx(0.d0,ww) * DPN22 + STN22 + 1.d0/dcmplx(0.d0,ww) * RRN22
+        !do itmp=1,nshot
         P2(:,:,1) = dcmplx(Pext(1:nbc(2),:),0d0)
+        !enddo
+        !iparm(3) = 8	! number of processors
         iparm(8) = 0
+        !iparm(59) = 2
         allocate( Dis2(nbc(2),nshot))
         if ((iSample == 0) .and. (ifreq == 1)) then
             call pardiso(pt, 1, 1, 13, 13, nbc(2), DSN22, ia, ja, idum, nshot, iparm, 1, P2(:,1:nshot,1), Dis2, ierr)
@@ -160,8 +193,12 @@
         allocate(P2(nbc(2),nshot,1))
         ww = 2.d0*pi * freq(ifreq)
         DSN22 = -ww**2.d0 * MSN22 + dcmplx(0.d0,ww) * DPN22 + STN22 + 1.d0/dcmplx(0.d0,ww) * RRN22
+        !do itmp=1,nshot
         P2(:,:,1) = dcmplx(Pext(1:nbc(2),:),0d0)
+        !enddo
+        !iparm(3) = 8	! number of processors
         iparm(8) = 0
+        !iparm(59) = 2
         allocate( Dis2(nbc(2),nshot))
         if ((iSample == 0) .and. (ifreq == 1)) then
             call pardiso(pt, 1, 1, 13, 13, nbc(2), DSN22, ia, ja, idum, nshot, iparm, 1, P2(:,1:nshot,1), Dis2, ierr)
@@ -175,16 +212,23 @@
             enddo
         enddo
         deallocate(P2)
+        !allocate(P2(nbc(2),nshot,1))
+        !P2 = dcmplx(0d0,0d0)
+        !dDis2dm = dcmplx(0d0,0d0)
         v_P2=dcmplx(0d0,0d0)
         !$omp parallel do
         do imatrl = 1 , nmatrl
             call dSdmU_elastic(nshot,onode,nobs,nnode, nelmt, nmatrl, CSest(:,1), rhos,nuy,beta, x, z, enode, matrl, etype, epara, nbc, id, ia, ja, imatrl,ww, Dis2, v_P2,nnz_P2,pB_P2,pE_P2,ja_P2)
+            !call dSdmU_elastic_assemble(nnode, nelmt, nmatrl, CSest(:,2), enode, matrl, nbc, id, ia, ja, imatrl, ww, Dis2, P2(:,imatrl),dStiffness,his_n,his_jtmp,his_yy)
         enddo
         !$omp end parallel do
         deallocate( Dis2)
 
 
+        !deallocate (P2)
 
+        !call sparse_get_valueTZ(nshot,nmatrl,nbc(2),ja_P2,pB_P2,pE_P2,v_P2,nnz_p2,P2)
+        !deallocate(P2)
         allocate (invDSN22T(nbc(2),nobs))
         call pardiso(pt, 1, 1, 13, 23, nbc(2), DSN22, ia, ja, idum, nobs, iparm, 0, eK, invDSN22T, ierr)
 
@@ -192,8 +236,10 @@
         do ishot=1,nshot
             call As_m_Bd(v_P2(:,ishot),ja_P2,pB_P2,pE_P2,nnz_P2,nmatrl,nbc(2),nobs,invDSN22T,dDis2dmT)
             dDis2dm=transpose(dDis2dmT)
+            !call zgemm('T', 'N', nobs, nmatrl, nbc(2), dcmplx(1d0,0d0), invDSN22T, nbc(2), P2,nbc(2), dcmplx(0d0,0d0), dDis2dm, nobs)
 
             do itmp = 1 , nobs
+                !Hmat(nobs*nshot*(ifreq-1)+(ishot-1)*nobs+itmp,:) = dDis2dm(itmp,:)
                 dUz_estimated(nobs*nshot*(ifreq-1)+(ishot-1)*nobs+itmp,:,1)= dDis2dm(itmp,:)
             enddo
         enddo
@@ -211,10 +257,6 @@
     CA_Uz_obs(nfreq*nobs*nshot+1:nfreq*nobs*nshot*2)=dconjg(dobs)
 
 
-    call hessgrad(GA,CA_Uz_cal,CA_Uz_obs,inv_Ca_D,inv_sigma_M2,CSest(:,1),CS0,2*nfreq*nobs*nshot,nmatrl,hess,grad)
-
-    !call Cmd_Cdd_ensemble(GA,CS0,nmatrl,2*nfreq*nobs*nshot,C_md,Ldd,invcovUz,sigma_M2,CA_Uz_cal,CA_Uz_obs,Csest(:,1))
-    !call solution_ensemble(GA,C_md,Ldd,CA_Uz_cal,CA_Uz_obs,CSest(:,1),CS0,nmatrl,2*nfreq*nobs*nshot,dCS)
 
 
 
@@ -224,12 +266,47 @@
         write (*,*) '- Group :',igroup,' / ',ngroup
         iSample = iSample + 1
         write (*,*) '       + Iteration :',iSample,' / ',nSample
+        !call hessgrad(GA,CA_Uz_cal,CA_Uz_obs,inv_Ca_D,inv_sigma_M2,CSest(:,1),CS0,2*nfreq*nobs*nshot,nmatrl,hess,grad)
+
+        call Cmd_Cdd_ensemble(GA,CS0,nmatrl,2*nfreq*nobs*nshot,C_md,Ldd,invcovUz,sigma_M2,CA_Uz_cal,CA_Uz_obs,Csest(:,1))
+        call solution_ensemble(GA,C_md,Ldd,CA_Uz_cal,CA_Uz_obs,CSest(:,1),CS0,nmatrl,2*nfreq*nobs*nshot,dCS)
 
 
-        call solveAxB_Z(nmatrl,1, hess, grad,dCs_c)
-        dCs=dreal(dCs_c)
-        CSest(:,2) = CSest(:,1) -dCs
-        !CSest(:,2) = CS0-dCs
+        !hess=hess1
+        !grad=grad1
+        !call random_stdnormal(randCs,nmatrl)
+
+        !call system_clock(tclock2)
+        !call solveAxB_Z(nmatrl,1, hess, grad,dCs_c)
+        !dCs=dreal(dCs_c)
+        !call system_clock(tclock22, clock_rate2)
+        !elapsed_time2 = float(tclock22 - tclock2) / float(clock_rate2)
+        !write(*,*) "dCs", elapsed_time2
+
+
+        !call cholesky_lower(nmatrl, hess,cholhess)
+        CStemp =randCs
+        randCs=0d0
+        !call system_clock(tclock2)
+        !call DTRTRS('L','T','N',nmatrl,1,cholhess,nmatrl,CStemp,nmatrl,INFO)
+        !CSest(:,2) =CSest(:,1) -alpha_coef*dCs+beta_coef*CStemp
+        CSest(:,2) = CS0-alpha_coef*dCs+beta_coef*CStemp
+        !call system_clock(tclock22, clock_rate2)
+        !elapsed_time2 = float(tclock22 - tclock2) / float(clock_rate2)
+        !write(*,*) "DTRTRS", elapsed_time2
+
+
+        !CStemp=CSest(:,1) - (CSest(:,1)+dCs)
+        !call system_clock(tclock2)
+        !call postprop(hess,CStemp,1d0,nmatrl,post0)
+        !call system_clock(tclock22, clock_rate2)
+        !elapsed_time2 = float(tclock22 - tclock2) / float(clock_rate2)
+        !write(*,*) "postprop", elapsed_time2*4
+        !
+        !CStemp = CSest(:,2) - (CSest(:,1)+dCs)
+        !call postprop(hess,CStemp,1d0,nmatrl,post1)
+        !CStemp = CSest(:,2) - (CSest(:,1)+alpha_coef*dCs)
+        !call postprop(hess,CStemp,1d0/beta_coef**2d0,nmatrl,prop01)
 
         call FiniteElement_PlaneStrain(CS_equi,nnode, nelmt, nmatrl, CSest(:,2), rhos,nuy,beta, MSN22, DPN22,  STN22, RRN22,x, z, enode, matrl, etype, epara, nbc, id, ia, ja)
 
@@ -280,7 +357,7 @@
         GA(1+nfreq*nobs*nshot:2*nfreq*nobs*nshot,:)=dconjg(dUz_estimated(:,:,1))
         CA_Uz_cal(1:nfreq*nobs*nshot)=Uz_estimated(:,2)
         CA_Uz_cal(nfreq*nobs*nshot+1:nfreq*nobs*nshot*2)=dconjg(Uz_estimated(:,2))
-        call hessgrad(GA,CA_Uz_cal,CA_Uz_obs,inv_Ca_D,inv_sigma_M2,CSest(:,2),CS0,2*nfreq*nobs*nshot,nmatrl,hess,grad)
+        !call hessgrad(GA,CA_Uz_cal,CA_Uz_obs,inv_Ca_D,inv_sigma_M2,CSest(:,2),CS0,2*nfreq*nobs*nshot,nmatrl,hess,grad)
         !call Cmd_Cdd_ensemble(GA,CS0,nmatrl,2*nfreq*nobs*nshot,C_md,Ldd,invcovUz,sigma_M2,CA_Uz_cal,CA_Uz_obs,Csest(:,2))
         !call solution_ensemble(GA,C_md,Ldd,CA_Uz_cal,CA_Uz_obs,CSest(:,2),CS0,nmatrl,2*nfreq*nobs*nshot,dCS)
 
@@ -344,6 +421,58 @@
                 enddo
                 CA_Uz_obs(1:nfreq*nobs*nshot)=dobs
                 CA_Uz_obs(nfreq*nobs*nshot+1:nfreq*nobs*nshot*2)=dconjg(dobs)
+                call FiniteElement_PlaneStrain(CS_equi,nnode, nelmt, nmatrl, CSest(:,2), rhos,nuy,beta, MSN22, DPN22,  STN22, RRN22,x, z, enode, matrl, etype, epara, nbc, id, ia, ja)
+
+                do ifreq = 1 , nfreq
+                    allocate(P2(nbc(2),nshot,1))
+                    ww = 2.d0*pi * freq(ifreq)
+                    DSN22 = -ww**2.d0 * MSN22 + dcmplx(0.d0,ww) * DPN22 + STN22 + 1.d0/dcmplx(0.d0,ww) * RRN22
+                    P2(:,:,1) = dcmplx(Pext(1:nbc(2),:),0d0)
+                    iparm(8) = 0
+                    allocate( Dis2(nbc(2),nshot))
+                    iparm(8) = 0
+                    call pardiso(pt, 1, 1, 13, 23, nbc(2), DSN22, ia, ja, idum, nshot, iparm, 0, P2(:,1:nshot,1), Dis2, ierr)
+
+
+                    do ishot=1,nshot
+                        do itmp = 1 , nobs
+                            dprd(nobs*nshot*(ifreq-1)+(ishot-1)*nobs+itmp)=Dis2(id(onode(itmp),2),ishot)
+                        enddo
+                    enddo
+                    deallocate(P2)
+                    v_P2=dcmplx(0d0,0d0)
+                    !$omp parallel do
+                    do imatrl = 1 , nmatrl
+                        call dSdmU_elastic(nshot,onode,nobs,nnode, nelmt, nmatrl, CSest(:,2), rhos,nuy,beta, x, z, enode, matrl, etype, epara, nbc, id, ia, ja, imatrl,ww, Dis2, v_P2,nnz_P2,pB_P2,pE_P2,ja_P2)
+                    enddo
+                    !$omp end parallel do
+                    deallocate( Dis2)
+                    allocate (invDSN22T(nbc(2),nobs))
+                    call pardiso(pt, 1, 1, 13, 23, nbc(2), DSN22, ia, ja, idum, nobs, iparm, 0, eK, invDSN22T, ierr)
+
+                    allocate(dDis2dm(nobs,nmatrl),dDis2dmT(nmatrl,nobs))
+                    do ishot=1,nshot
+                        call As_m_Bd(v_P2(:,ishot),ja_P2,pB_P2,pE_P2,nnz_P2,nmatrl,nbc(2),nobs,invDSN22T,dDis2dmT)
+                        dDis2dm=transpose(dDis2dmT)
+                        do itmp = 1 , nobs
+                            dUz_estimated(nobs*nshot*(ifreq-1)+(ishot-1)*nobs+itmp,:,1)= dDis2dm(itmp,:)
+                        enddo
+                    enddo
+                    deallocate(dDis2dm,dDis2dmT)
+                    deallocate (invDSN22T)
+
+                enddo
+
+
+                Uz_estimated(:,2)=dprd
+
+                GA(1:nfreq*nobs*nshot,:)=dUz_estimated(:,:,1)
+                GA(1+nfreq*nobs*nshot:2*nfreq*nobs*nshot,:)=dconjg(dUz_estimated(:,:,1))
+                CA_Uz_cal(1:nfreq*nobs*nshot)=Uz_estimated(:,2)
+                CA_Uz_cal(nfreq*nobs*nshot+1:nfreq*nobs*nshot*2)=dconjg(Uz_estimated(:,2))
+                !call hessgrad(GA,CA_Uz_cal,CA_Uz_obs,inv_Ca_D,inv_sigma_M2,CSest(:,2),CS0,2*nfreq*nobs*nshot,nmatrl,hess,grad)
+                call Cmd_Cdd_ensemble(GA,CS0,nmatrl,2*nfreq*nobs*nshot,C_md,Ldd,invcovUz,sigma_M2,CA_Uz_cal,CA_Uz_obs,Csest(:,2))
+                call solution_ensemble(GA,C_md,Ldd,CA_Uz_cal,CA_Uz_obs,CSest(:,2),CS0,nmatrl,2*nfreq*nobs*nshot,dCS)
 
 
 
@@ -419,8 +548,12 @@
         GA(1+nfreq_total*nobs*nshot:2*nfreq_total*nobs*nshot,imatrl)=dconjg(GA(1:nfreq_total*nobs*nshot,imatrl))
     enddo
 
+    !call update_inv_sigma_M2(GA,CA_Uz_cal,CA_Uz_obs,inv_Ca_D, inv_sigma_M2,CSest,2*nfreq*nobs*nshot,nmatrl)
+
     call update_inv_sigma_M2(GA,inv_Ca_D, inv_sigma_M2,2*nfreq_total*nobs*nshot,nmatrl)
-  
+    !write (outcovM,'(<nmatrl>f15.5)')  1d0/dsqrt(inv_sigma_M2(1:nmatrl))
+    !call update_inv_sigma_M2(GA,CA_Uz_cal,CA_Uz_obs,inv_Ca_D, inv_sigma_M2,CSest(:,1),2*nfreq*nobs*nshot,nmatrl)
+
     do imatrl =1,nmatrl
         write (outcovM,'(<nmatrl>f15.5)')  inv_sigma_M2(imatrl,1:nmatrl)
     enddo

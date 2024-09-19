@@ -66,13 +66,13 @@
     !nx = 100+ 2 * npml
     !nz = 100+ npml
     !!
-    ngroup =10
+    ngroup =15
 
     !dx=0.005d0
     !dz=0.005d0
     dx = 0.0375!9.2d0 / (nx - 2 * npml)
     dz = 0.0375!3.0d0 / (nz - npml)
-    nfreq = 6
+    nfreq = 4
     nfreq_total = 60
     dfreq = (6d0-0.1d0)/(nfreq_total-1)
     dof=2
@@ -433,7 +433,7 @@
         !    enddo
         !enddo
         do imatrl=1,nmatrl
-            sigma_M2(imatrl,imatrl)=0.2d0**2d0
+            sigma_M2(imatrl,imatrl)=(0.1d0*CSest(imatrl,1))**2d0
         enddo
 open (1001 , file='marmousi.priC')
         do imatrl =1,nmatrl
