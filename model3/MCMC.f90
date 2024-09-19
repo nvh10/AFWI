@@ -66,13 +66,13 @@
     nx = 100+ 2 * npml
     nz = 100+ npml
     !!
-    ngroup =1
+    ngroup =15
 
     dx=0.005d0
     dz=0.005d0
     !dx = 9.2d0 / (nx - 2 * npml)
     !dz = 3.0d0 / (nz - npml)
-    nfreq = 5
+    nfreq = 2
     nfreq_total = 30
     dfreq = (30d0-1d0)/(nfreq_total-1)
     dof=2
@@ -510,8 +510,11 @@
             sigma_M2( jtmp,jtmp) = ((0.15d0-(itmp-1)*d_sigma))
             enddo
         enddo
+        !do imatrl=1,nmatrl
+        !    sigma_M2(imatrl,imatrl)=(sigma_M2(imatrl,imatrl)*1.5d0)**2d0
+        !enddo
         do imatrl=1,nmatrl
-            sigma_M2(imatrl,imatrl)=(sigma_M2(imatrl,imatrl)*1.5d0)**2d0
+            sigma_M2(imatrl,imatrl)=(0.1*CSest(imatrl,1))**2d0
         enddo
           open (1001 , file='inclusion.priC')
         do imatrl =1,nmatrl
