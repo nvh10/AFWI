@@ -66,13 +66,13 @@
     nx = 100+ 2 * npml
     nz = 100+ npml
     !!
-    ngroup =6
+    ngroup =12
 
     dx=0.005d0
     dz=0.005d0
     !dx = 9.2d0 / (nx - 2 * npml)
     !dz = 3.0d0 / (nz - npml)
-    nfreq = 5
+    nfreq = 2
     nfreq_total = 30
     dfreq = (30d0-1d0)/(nfreq_total-1)
     dof=2
@@ -416,7 +416,7 @@
             enddo
         enddo
         do imatrl=1,nmatrl
-            sigma_M2(imatrl,imatrl)=(sigma_M2(imatrl,imatrl)*CSest(imatrl,1))**2d0
+            sigma_M2(imatrl,imatrl)=(0.1d0*CSest(imatrl,1))**2d0
         enddo
            
         sigma_M2=0.5d0*sigma_M2
