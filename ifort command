@@ -1,0 +1,2 @@
+To compile the code in Linux ifort, I use this command
+ifort -qopenmp  -I"$/opt/intel/oneapi/mkl/2022.1.0/include" -fpp -qmkl -nologo -O3 -Os -parallel -heap-arrays[0] -zero -i4 -g -check bounds -traceback dSdmU_elastic.f90 FEM.f90 ForwardModel.f90 MCMC.f90 MCMCcore.f90 MCMCPardiso.f90 gauspt.f90 input.f90 lapack.f90 MCMCReference.f90 -o Console1
